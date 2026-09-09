@@ -31,7 +31,7 @@ from .colorimetry import (
 try:
     # v2 filename is used for side-by-side testing. After the user renames the
     # files back to their canonical names, the fallback import below is used.
-    from .plottingS import (
+    from .plotting import (
         CIERange,
         PlotStyle,
         PointAppearance,
