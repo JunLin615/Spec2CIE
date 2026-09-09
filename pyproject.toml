@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SPEC2CIE"
+version = "1.0.0"
+description = "FDTD reflectance spectrum to CIE 1976 u'v' analysis and plotting tool"
+readme = "readme.md"
+requires-python = ">=3.10,<3.14"
+authors = [
+  {name = "SPEC2CIE contributors"}
+]
+dependencies = [
+  "numpy>=1.24,<3",
+  "matplotlib>=3.7,<4",
+  "colour-science>=0.4.6,<0.5",
+]
+
+[project.scripts]
+spec2cie = "SPEC2CIE.cie1976_fdtd_viewer:launch_gui"
+spec2cie-csv = "SPEC2CIE.txt_to_interpolated_csv_gui:launch_gui"
+
+[tool.setuptools]
+packages = ["SPEC2CIE"]
