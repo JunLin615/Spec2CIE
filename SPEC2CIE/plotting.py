@@ -9,6 +9,7 @@ future batch pipelines.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 import matplotlib.pyplot as plt
@@ -403,10 +404,85 @@ def plot_spectra(
         return fig
 
 
-def export_figure(figure: Figure, path: str, *, dpi: int = 300) -> None:
-    """Export a Matplotlib figure to PNG/TIFF/SVG/PDF or any supported format."""
+def export_figure(figure: Figure, path: str, *, dpi: int = 300, transparent_background: bool | None = None) -> None:
+    """Export a Matplotlib figure with robust PNG transparency.
 
-    figure.savefig(path, dpi=dpi, bbox_inches="tight")
+    For transparent export, the Figure patch, every Axes patch, and legend frame
+    are temporarily forced to alpha=0 before rendering. Their original appearance
+    is restored immediately afterwards, so the on-screen GUI is unchanged.
+
+    PNG files are transparent by default. A post-export alpha check is performed
+    for PNG so an unexpectedly opaque file is reported instead of silently saved.
+    """
+
+    suffix = Path(path).suffix.lower()
+    if transparent_background is None:
+        transparent_background = suffix == ".png"
+
+    # Save patch state so transparent export does not alter the interactive figure.
+    patch_states = []
+
+    def make_patch_transparent(patch) -> None:
+        if patch is None:
+            return
+        patch_states.append((patch, patch.get_facecolor(), patch.get_edgecolor(), patch.get_alpha()))
+        patch.set_facecolor("none")
+        patch.set_edgecolor("none")
+        patch.set_alpha(0.0)
+
+    if transparent_background:
+        make_patch_transparent(figure.patch)
+        for ax in figure.axes:
+            make_patch_transparent(ax.patch)
+            legend = ax.get_legend()
+            if legend is not None:
+                make_patch_transparent(legend.get_frame())
+
+    save_kwargs = {
+        "dpi": dpi,
+        "bbox_inches": "tight",
+        "transparent": bool(transparent_background),
+    }
+    if transparent_background:
+        save_kwargs["facecolor"] = (0.0, 0.0, 0.0, 0.0)
+        save_kwargs["edgecolor"] = (0.0, 0.0, 0.0, 0.0)
+
+    try:
+        figure.savefig(path, **save_kwargs)
+    finally:
+        for patch, facecolor, edgecolor, alpha in reversed(patch_states):
+            patch.set_facecolor(facecolor)
+            patch.set_edgecolor(edgecolor)
+            patch.set_alpha(alpha)
+
+        # Refresh an interactive canvas after restoring its visible background.
+        canvas = getattr(figure, "canvas", None)
+        if canvas is not None:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
+
+    # Validate the actual written PNG, not just Matplotlib's requested settings.
+    if transparent_background and suffix == ".png":
+        try:
+            from PIL import Image
+
+            with Image.open(path) as image:
+                if "A" not in image.getbands():
+                    raise RuntimeError(
+                        "PNG export produced no alpha channel even though transparent export was requested."
+                    )
+                alpha_min, alpha_max = image.getchannel("A").getextrema()
+                if alpha_min == 255 and alpha_max == 255:
+                    raise RuntimeError(
+                        "PNG export produced an alpha channel, but every pixel is fully opaque. "
+                        "The transparent background was not applied by the active Matplotlib backend."
+                    )
+        except ImportError:
+            # Pillow is normally present because Matplotlib depends on it. If it is
+            # unavailable, the file is still kept; only validation is skipped.
+            pass
 
 
 __all__ = [

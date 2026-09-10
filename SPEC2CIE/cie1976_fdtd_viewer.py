@@ -28,37 +28,24 @@ from .colorimetry import (
     analyze_fdtd_file,
     export_results_csv,
 )
-try:
-    # v2 filename is used for side-by-side testing. After the user renames the
-    # files back to their canonical names, the fallback import below is used.
-    from .plotting import (
-        CIERange,
-        PlotStyle,
-        PointAppearance,
-        ZoomRegion,
-        export_figure,
-        marker_for_index,
-        plot_cie1976_main,
-        plot_cie1976_zoom,
-        plot_spectra,
-    )
-except ImportError:
-    from .plotting import (
-        CIERange,
-        PlotStyle,
-        PointAppearance,
-        ZoomRegion,
-        export_figure,
-        marker_for_index,
-        plot_cie1976_main,
-        plot_cie1976_zoom,
-        plot_spectra,
-    )
+
+from .plotting import (
+    CIERange,
+    PlotStyle,
+    PointAppearance,
+    ZoomRegion,
+    export_figure,
+    marker_for_index,
+    plot_cie1976_main,
+    plot_cie1976_zoom,
+    plot_spectra,
+)
+
 from .txt_to_interpolated_csv_gui import find_txt_files
 
 
 APP_TITLE = "SPEC2CIE - FDTD Reflectance to CIE 1976"
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 
 @dataclass
@@ -860,7 +847,13 @@ class SPEC2CIEApp:
             return
         try:
             dpi = int(float(self.dpi_var.get()))
-            export_figure(figure, path, dpi=dpi)
+            is_png = Path(path).suffix.lower() == ".png"
+            export_figure(
+                figure,
+                path,
+                dpi=dpi,
+                transparent_background=is_png,
+            )
         except Exception as exc:
             messagebox.showerror("Export error", str(exc))
             return
