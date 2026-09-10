@@ -29,6 +29,7 @@ from .colorimetry import (
     export_results_csv,
 )
 
+
 from .plotting import (
     CIERange,
     PlotStyle,
@@ -40,12 +41,11 @@ from .plotting import (
     plot_cie1976_zoom,
     plot_spectra,
 )
-
 from .txt_to_interpolated_csv_gui import find_txt_files
 
 
 APP_TITLE = "SPEC2CIE - FDTD Reflectance to CIE 1976"
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 
 
 @dataclass
@@ -100,6 +100,12 @@ class SPEC2CIEApp:
         self.figure_width_var = tk.StringVar(value="6.5")
         self.figure_height_var = tk.StringVar(value="6.0")
         self.dpi_var = tk.StringVar(value="300")
+
+        # Optional physical Axes-box locks. These constrain the rectangle inside
+        # the Figure, not the Tk canvas / whole exported image.
+        self.lock_main_cie_box_aspect_var = tk.BooleanVar(value=False)
+        self.lock_spectra_box_aspect_var = tk.BooleanVar(value=False)
+        self.spectra_box_aspect_var = tk.StringVar(value="0.75")
 
         self.show_grid_var = tk.BooleanVar(value=False)
         self.show_locus_var = tk.BooleanVar(value=True)
@@ -252,8 +258,30 @@ class SPEC2CIEApp:
                 ttk.Label(frame, text=label2).grid(row=row, column=2, sticky="w", pady=2)
                 ttk.Entry(frame, textvariable=var2, width=10).grid(row=row, column=3, sticky="ew", padx=(5, 0), pady=2)
 
+        aspect = ttk.LabelFrame(frame, text="Axes Box Aspect Ratio", padding=5)
+        aspect.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 2))
+        aspect.columnconfigure(1, weight=1)
+        aspect.columnconfigure(3, weight=1)
+        ttk.Checkbutton(
+            aspect,
+            text="Lock Main CIE",
+            variable=self.lock_main_cie_box_aspect_var,
+        ).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(aspect, text="Uses v' span / u' span").grid(
+            row=0, column=2, columnspan=2, sticky="e"
+        )
+        ttk.Checkbutton(
+            aspect,
+            text="Lock Spectra",
+            variable=self.lock_spectra_box_aspect_var,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+        ttk.Label(aspect, text="H/W").grid(row=1, column=2, sticky="e", pady=(3, 0))
+        ttk.Entry(aspect, textvariable=self.spectra_box_aspect_var, width=8).grid(
+            row=1, column=3, sticky="ew", padx=(5, 0), pady=(3, 0)
+        )
+
         checks = ttk.Frame(frame)
-        checks.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(5, 0))
+        checks.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(5, 0))
         ttk.Checkbutton(checks, text="Diagram colours", variable=self.show_background_var).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(checks, text="Spectral locus", variable=self.show_locus_var).grid(row=0, column=1, sticky="w", padx=(8, 0))
         ttk.Checkbutton(checks, text="Grid", variable=self.show_grid_var).grid(row=1, column=0, sticky="w")
@@ -613,11 +641,18 @@ class SPEC2CIEApp:
                 show_zoom_rectangle=self.show_zoom_rectangle_var.get(),
                 match_legend_text_color=self.legend_text_color_var.get(),
                 improve_light_text_readability=self.readable_legend_var.get(),
+                lock_main_cie_box_aspect=self.lock_main_cie_box_aspect_var.get(),
+                lock_spectra_box_aspect=self.lock_spectra_box_aspect_var.get(),
+                spectra_box_aspect=float(self.spectra_box_aspect_var.get()),
             )
         except ValueError as exc:
-            raise ValueError("Plot sizes, font sizes, line widths, and DPI must be numeric.") from exc
-        if min(style.axis_font_size, style.tick_font_size, style.legend_font_size, style.marker_size, style.axis_line_width, style.figure_width_in, style.figure_height_in, style.dpi) <= 0:
-            raise ValueError("Plot numeric settings must be greater than zero.")
+            raise ValueError("Plot sizes, font sizes, line widths, DPI, and aspect ratios must be numeric.") from exc
+        if min(
+            style.axis_font_size, style.tick_font_size, style.legend_font_size,
+            style.marker_size, style.axis_line_width, style.figure_width_in,
+            style.figure_height_in, style.dpi, style.spectra_box_aspect,
+        ) <= 0:
+            raise ValueError("Plot numeric settings and aspect ratios must be greater than zero.")
         return style
 
     def _main_cie_range(self) -> CIERange:

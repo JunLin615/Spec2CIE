@@ -54,6 +54,11 @@ class PlotStyle:
     show_zoom_rectangle: bool = True
     match_legend_text_color: bool = True
     improve_light_text_readability: bool = True
+    # Lock the physical Axes rectangle rather than the full Figure canvas.
+    # Main CIE uses its visible data-range ratio to preserve equal u'/v' scale.
+    lock_main_cie_box_aspect: bool = False
+    lock_spectra_box_aspect: bool = False
+    spectra_box_aspect: float = 0.75  # Axes height / width.
 
 
 @dataclass(frozen=True)
@@ -194,6 +199,59 @@ def _draw_cie_background(ax, style: PlotStyle, observer: str, bounding_box=None)
             line.set_linewidth(style.spectral_locus_line_width)
 
 
+def cie1976_position_rgb(u_prime: float, v_prime: float) -> tuple[float, float, float]:
+    """Return the same display RGB mapping used by Colour's CIE 1976 background.
+
+    The colour is derived only from the CIE 1976 chromaticity position, not from
+    the measured Y tristimulus value and not from the selected illuminant white.
+    Consequently, a marker placed on the diagram visually matches the diagram
+    colour at that position. When a new observer or illuminant is analysed, the
+    point coordinates move and the plot colour follows the new coordinates.
+
+    This deliberately mirrors ``colour.plotting``: CIE 1976 u'v' -> XYZ at a
+    nominal luminance -> plotting sRGB -> per-colour maximum normalisation.
+    """
+
+    try:
+        import numpy as np
+        from colour.algebra import normalise_maximum  # type: ignore
+        from colour.plotting import (  # type: ignore
+            CONSTANTS_COLOUR_STYLE,
+            XYZ_to_plotting_colourspace,
+        )
+        from colour.plotting.diagrams import METHODS_CHROMATICITY_DIAGRAM  # type: ignore
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise RuntimeError(
+            "The 'colour-science' package is required for CIE plot colours."
+        ) from exc
+
+    ij = np.asarray([float(u_prime), float(v_prime)], dtype=float)
+    if not np.all(np.isfinite(ij)):
+        return (0.5, 0.5, 0.5)
+
+    illuminant = CONSTANTS_COLOUR_STYLE.colour.colourspace.whitepoint
+    ij_to_XYZ = METHODS_CHROMATICITY_DIAGRAM["CIE 1976 UCS"]["ij_to_XYZ"]
+    XYZ = np.asarray(ij_to_XYZ(ij, illuminant), dtype=float)
+    RGB = np.asarray(XYZ_to_plotting_colourspace(XYZ, illuminant), dtype=float)
+    RGB = np.asarray(normalise_maximum(RGB, axis=-1), dtype=float)
+    RGB = np.nan_to_num(RGB, nan=0.0, posinf=1.0, neginf=0.0)
+    RGB = np.clip(RGB, 0.0, 1.0)
+    return float(RGB[0]), float(RGB[1]), float(RGB[2])
+
+
+def _plot_colour_map(
+    analyses: Sequence[AnalyzedSpectrum],
+) -> dict[str, tuple[float, float, float]]:
+    """Return stable CIE-position colours for all current analyses."""
+
+    return {
+        str(a.result.source_path): cie1976_position_rgb(
+            a.result.u_prime, a.result.v_prime
+        )
+        for a in analyses
+    }
+
+
 def _appearance_map(
     analyses: Sequence[AnalyzedSpectrum],
     appearances: Mapping[str, PointAppearance] | None,
@@ -215,6 +273,7 @@ def _plot_points(
     appearances: Mapping[str, PointAppearance] | None = None,
 ) -> None:
     mapping = _appearance_map(analyses, appearances)
+    plot_colours = _plot_colour_map(analyses)
     legend_handles = []
     legend_labels = []
     legend_text_colours = []
@@ -223,7 +282,7 @@ def _plot_points(
         result = analysis.result
         appearance = mapping[str(result.source_path)]
         marker = appearance.marker
-        colour = result.rgb
+        colour = plot_colours[str(result.source_path)]
 
         handle = ax.plot(
             result.u_prime,
@@ -300,6 +359,19 @@ def plot_cie1976_main(
         _plot_points(ax, items, style, appearances)
         _style_axes(ax, style, x_label="u'", y_label="v'")
 
+        if style.lock_main_cie_box_aspect:
+            if region is not None:
+                # Height/width of the physical axes rectangle. This value also
+                # preserves equal physical scale for one u' and one v' unit.
+                ax.set_box_aspect(region.height / region.width)
+            else:
+                # Native Colour bounds are normally square-ish; use the actual
+                # resolved limits so locking never changes the plotted limits.
+                x0, x1 = ax.get_xlim()
+                y0, y1 = ax.get_ylim()
+                if x1 != x0 and y1 != y0:
+                    ax.set_box_aspect(abs((y1 - y0) / (x1 - x0)))
+
         if zoom_region is not None and style.show_zoom_rectangle:
             region = zoom_region.normalized()
             if region.width > 0 and region.height > 0:
@@ -368,6 +440,7 @@ def plot_spectra(
 
     items = list(analyses)
     mapping = _appearance_map(items, appearances)
+    plot_colours = _plot_colour_map(items)
     with plt.rc_context(_rc_params(style)):
         fig, ax = _new_figure(style)
 
@@ -383,7 +456,7 @@ def plot_spectra(
                 spectrum.values,
                 label=appearance.label,
                 linewidth=1.5,
-                color=analysis.result.rgb,
+                color=plot_colours[str(analysis.result.source_path)],
             )
 
         ax.set_xlabel("Wavelength (nm)", fontsize=style.axis_font_size)
@@ -396,10 +469,12 @@ def plot_spectra(
             legend = ax.legend(loc="best", fontsize=style.legend_font_size)
             if style.match_legend_text_color:
                 for text, analysis in zip(legend.get_texts(), items):
-                    colour = analysis.result.rgb
+                    colour = plot_colours[str(analysis.result.source_path)]
                     if style.improve_light_text_readability:
                         colour = readable_text_rgb(colour)
                     text.set_color(colour)
+        if style.lock_spectra_box_aspect:
+            ax.set_box_aspect(style.spectra_box_aspect)
         fig.tight_layout()
         return fig
 
@@ -487,9 +562,11 @@ def export_figure(figure: Figure, path: str, *, dpi: int = 300, transparent_back
 
 __all__ = [
     "MARKER_SEQUENCE",
+    "CIERange",
     "PlotStyle",
     "PointAppearance",
     "ZoomRegion",
+    "cie1976_position_rgb",
     "export_figure",
     "marker_for_index",
     "plot_cie1976_main",
